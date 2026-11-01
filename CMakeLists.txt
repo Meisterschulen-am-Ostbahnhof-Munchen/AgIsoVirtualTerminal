@@ -90,6 +90,7 @@ target_sources(
           "src/ObjectPointerComponent.cpp"
           "src/OutputNumberComponent.cpp"
           "src/SoftkeyMaskRenderArea.cpp"
+          "src/SoftKeyPageBar.cpp"
           "src/KeyComponent.cpp"
           "src/DesignatorFit.cpp"
           "src/SoftKeyMaskComponent.cpp"
@@ -104,6 +105,7 @@ target_sources(
           "src/InputStringComponent.cpp"
           "src/NumberComponent.cpp"
           "src/AlarmMaskAudio.cpp"
+          "src/NumericKeypadComponent.cpp"
           "src/AppImages.cpp"
           "src/ASCIILogFile.cpp"
           "src/ConfigureHardwareWindow.cpp"
@@ -127,6 +129,101 @@ target_link_libraries(
           isobus::Isobus isobus::HardwareIntegration isobus::Utility
   PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags
          cmake_git_version_tracking)
+
+option(AGISOVT_BUILD_POOL_RENDERER
+       "Build vt-render, which renders object pools to PNG files and a manifest"
+       OFF)
+if(AGISOVT_BUILD_POOL_RENDERER)
+  # The fonts every render uses, so that no render depends on the fonts
+  # installed
+  juce_add_binary_data(
+    VtRenderFonts
+    HEADER_NAME
+    VtRenderFonts.h
+    NAMESPACE
+    VtRenderFonts
+    SOURCES
+    res/fonts/DejaVuSansMono.ttf
+    res/fonts/DejaVuSansMono-Bold.ttf
+    res/fonts/DejaVuSansMono-Oblique.ttf
+    res/fonts/DejaVuSansMono-BoldOblique.ttf)
+
+  juce_add_console_app(VtRender PRODUCT_NAME "vt-render")
+  set_target_properties(VtRender PROPERTIES CXX_STANDARD 17)
+  set_target_properties(VtRender PROPERTIES OUTPUT_NAME vt-render)
+  target_compile_definitions(
+    VtRender PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_USE_XRANDR=0
+                     JUCE_USE_XINERAMA=0)
+  juce_generate_juce_header(VtRender)
+  target_sources(
+    VtRender
+    PRIVATE tools/vt-render/vt_render.cpp
+            src/JuceManagedWorkingSetCache.cpp
+            src/AlarmMaskComponent.cpp
+            src/ButtonComponent.cpp
+            src/ContainerComponent.cpp
+            src/DataMaskComponent.cpp
+            src/DesignatorFit.cpp
+            src/InputBooleanComponent.cpp
+            src/InputListComponent.cpp
+            src/InputNumberComponent.cpp
+            src/InputStringComponent.cpp
+            src/KeyComponent.cpp
+            src/SoftKeyPageBar.cpp
+            src/NumberComponent.cpp
+            src/ObjectPointerComponent.cpp
+            src/OutputEllipseComponent.cpp
+            src/OutputLineComponent.cpp
+            src/OutputLinearBarGraphComponent.cpp
+            src/OutputMeterComponent.cpp
+            src/OutputNumberComponent.cpp
+            src/OutputPolygonComponent.cpp
+            src/OutputRectangleComponent.cpp
+            src/OutputStringComponent.cpp
+            src/PictureGraphicComponent.cpp
+            src/SoftKeyMaskComponent.cpp
+            src/StringDrawingComponent.cpp
+            src/StringEncodingConversions.cpp
+            src/TextDrawingComponent.cpp
+            src/VT_NumberComponent.cpp
+            src/WorkingSetComponent.cpp)
+  target_include_directories(VtRender PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
+  target_link_libraries(
+    VtRender
+    PRIVATE VtRenderFonts
+            juce::juce_gui_extra
+            juce::juce_cryptography
+            isobus::Isobus
+            isobus::HardwareIntegration
+            isobus::Utility
+            cmake_git_version_tracking
+    PUBLIC juce::juce_recommended_config_flags)
+
+  # Renders a checkout of AgIsoObjectPoolCollection several times and checks
+  # that every image comes out the same. Run with ctest -C Release -R vt-render.
+  # The tests/pools submodule is used unless another checkout is given.
+  set(AGISOVT_DEFAULT_POOL_COLLECTION_DIR "")
+  if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/tests/pools/pools)
+    set(AGISOVT_DEFAULT_POOL_COLLECTION_DIR
+        ${CMAKE_CURRENT_LIST_DIR}/tests/pools)
+  endif()
+  set(AGISOVT_POOL_COLLECTION_DIR
+      "${AGISOVT_DEFAULT_POOL_COLLECTION_DIR}"
+      CACHE
+        PATH
+        "AgIsoObjectPoolCollection checkout for the vt-render determinism test")
+  if(AGISOVT_POOL_COLLECTION_DIR)
+    enable_testing()
+    add_test(
+      NAME vt-render-determinism
+      COMMAND
+        ${CMAKE_COMMAND} -DVT_RENDER=$<TARGET_FILE:VtRender>
+        -DCOLLECTION=${AGISOVT_POOL_COLLECTION_DIR}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/vt-render-determinism -P
+        ${CMAKE_CURRENT_LIST_DIR}/tools/vt-render/determinism_test.cmake)
+    set_tests_properties(vt-render-determinism PROPERTIES TIMEOUT 3600)
+  endif()
+endif()
 
 if(WIN32)
   add_custom_command(
@@ -226,10 +323,10 @@ set(CPACK_PACKAGE_EXECUTABLES "AgISOVirtualTerminal" "AgISOVirtualTerminal")
 set(CPACK_ALL_INSTALL_TYPES Full)
 set(CPACK_COMPONENT_LIBRARIES_INSTALL_TYPES Full)
 set(CPACK_COMPONENT_APPLICATIONS_INSTALL_TYPES Full)
-set(CPACK_NSIS_INSTALLED_ICON_NAME ${CMAKE_CURRENT_LIST_DIR}/doc/smallLogo.ico)
+set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\AgISOVirtualTerminal.exe")
 set(CPACK_NSIS_CONTACT ${CPACK_PACKAGE_CONTACT})
-set(CPACK_NSIS_MUI_ICON ${CPACK_NSIS_INSTALLED_ICON_NAME})
-set(CPACK_NSIS_MUI_UNICON ${CPACK_NSIS_INSTALLED_ICON_NAME})
+set(CPACK_NSIS_MUI_ICON ${CMAKE_CURRENT_LIST_DIR}/doc/smallLogo.ico)
+set(CPACK_NSIS_MUI_UNICON ${CPACK_NSIS_MUI_ICON})
 set(CPACK_NSIS_DISPLAY_NAME "AgISOVirtualTerminal")
 set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 set(CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT applications)
@@ -242,7 +339,7 @@ if(APPLE)
   set(CPACK_DMG_VOLUME_NAME "${PROJECT_NAME}")
   set(CPACK_SYSTEM_NAME "OSX")
   set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}")
-  set(CPACK_PACKAGE_ICON ${CPACK_NSIS_INSTALLED_ICON_NAME})
+  set(CPACK_PACKAGE_ICON ${CPACK_NSIS_MUI_ICON})
 endif()
 
 # Must be after the last CPACK macros

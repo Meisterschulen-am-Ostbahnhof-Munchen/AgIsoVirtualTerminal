@@ -5,10 +5,16 @@
 *******************************************************************************/
 #include "PictureGraphicComponent.hpp"
 
+bool PictureGraphicComponent::useSoftwareImages = false;
+
 PictureGraphicComponent::PictureGraphicComponent(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet, isobus::PictureGraphic sourceObject) :
   isobus::PictureGraphic(sourceObject),
   parentWorkingSet(workingSet),
-  reconstructedImage(Image::PixelFormat::ARGB, get_actual_width(), get_actual_height(), true)
+  reconstructedImage(Image::PixelFormat::ARGB,
+                     get_actual_width(),
+                     get_actual_height(),
+                     true,
+                     useSoftwareImages ? static_cast<const ImageType &>(SoftwareImageType()) : static_cast<const ImageType &>(NativeImageType()))
 {
 	generate_and_store_image();
 	setSize(PictureGraphic::get_width(), PictureGraphic::get_height());
@@ -53,6 +59,13 @@ void PictureGraphicComponent::paint(Graphics &g)
 
 	if (showImage)
 	{
+		// Smoothing blurs an enlarged bitmap, so its pixels are just repeated instead
+		const auto pixelsPerImagePixel = g.getInternalContext().getPhysicalPixelScaleFactor() * static_cast<float>(getWidth()) / static_cast<float>(juce::jmax(1, reconstructedImage.getWidth()));
+
+		if (pixelsPerImagePixel > 1.0f)
+		{
+			g.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+		}
 		g.drawImage(reconstructedImage, getLocalBounds().toFloat());
 	}
 }
@@ -71,6 +84,11 @@ void PictureGraphicComponent::visibilityChanged()
 			stopTimer();
 		}
 	}
+}
+
+void PictureGraphicComponent::set_use_software_images(bool useSoftware)
+{
+	useSoftwareImages = useSoftware;
 }
 
 void PictureGraphicComponent::timerCallback()
