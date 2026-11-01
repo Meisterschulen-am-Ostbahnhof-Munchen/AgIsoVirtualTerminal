@@ -1616,6 +1616,8 @@ void ServerMainComponent::transferred_object_pool_parse_start(std::shared_ptr<is
 	fs.close();
 }
 
+// The VT server runs the macros of a Change Active Mask command itself: On Change Active Mask of the Working Set,
+// and On Hide/On Show of the old and new mask and their Soft Key Masks. This callback only updates the display.
 void ServerMainComponent::on_change_active_mask_callback(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> affectedWorkingSet, std::uint16_t, std::uint16_t newMask)
 {
 	if (isobus::VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Joined == affectedWorkingSet->get_object_pool_processing_state())
@@ -1674,16 +1676,11 @@ void ServerMainComponent::on_change_active_mask_callback(std::shared_ptr<isobus:
 					default:
 						break;
 				}
-				process_macro(activeMask, isobus::EventID::OnShow, isobus::VirtualTerminalObjectType::AlarmMask, activeWorkingSet);
-				process_macro(activeMask, isobus::EventID::OnChangeActiveMask, isobus::VirtualTerminalObjectType::AlarmMask, activeWorkingSet);
 			}
 			else if (isobus::VirtualTerminalObjectType::DataMask == activeMask->get_object_type())
 			{
 				auto dataMask = std::static_pointer_cast<isobus::DataMask>(activeMask);
 				activeWorkingSetSoftkeyMaskObjectID = dataMask->get_soft_key_mask();
-				// Also process macros for the actual datamask (container) show event
-				process_macro(activeMask, isobus::EventID::OnShow, isobus::VirtualTerminalObjectType::DataMask, activeWorkingSet);
-				process_macro(activeMask, isobus::EventID::OnChangeActiveMask, isobus::VirtualTerminalObjectType::DataMask, activeWorkingSet);
 			}
 		}
 	}
