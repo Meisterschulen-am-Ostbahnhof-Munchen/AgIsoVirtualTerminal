@@ -1221,6 +1221,21 @@ static std::shared_ptr<isobus::VTObject> get_active_mask(const std::shared_ptr<i
 	return retVal;
 }
 
+static std::uint16_t get_soft_key_mask(const std::shared_ptr<isobus::VTObject> &mask)
+{
+	std::uint16_t retVal = isobus::NULL_OBJECT_ID;
+
+	if (is_alarm_mask(mask))
+	{
+		retVal = std::static_pointer_cast<isobus::AlarmMask>(mask)->get_soft_key_mask();
+	}
+	else if ((nullptr != mask) && (isobus::VirtualTerminalObjectType::DataMask == mask->get_object_type()))
+	{
+		retVal = std::static_pointer_cast<isobus::DataMask>(mask)->get_soft_key_mask();
+	}
+	return retVal;
+}
+
 void ServerMainComponent::change_selected_working_set(std::uint8_t index)
 {
 	const auto highestAlarmWorkingSet = get_highest_priority_alarm_working_set();
@@ -1252,20 +1267,12 @@ void ServerMainComponent::change_selected_working_set(std::uint8_t index)
 		auto workingSetObject = std::static_pointer_cast<isobus::WorkingSet>(ws->get_working_set_object());
 		std::uint16_t previousActiveMask = activeWorkingSetDataMaskObjectID;
 		activeWorkingSetDataMaskObjectID = workingSetObject->get_active_mask();
-		activeWorkingSetSoftkeyMaskObjectID = isobus::NULL_OBJECT_ID;
-
 		auto activeMask = ws->get_object_by_id(activeWorkingSetDataMaskObjectID);
-		if (nullptr != activeMask)
+		activeWorkingSetSoftkeyMaskObjectID = get_soft_key_mask(activeMask);
+
+		if ((nullptr != activeMask) && (isobus::VirtualTerminalObjectType::DataMask == activeMask->get_object_type()))
 		{
-			if (isobus::VirtualTerminalObjectType::AlarmMask == activeMask->get_object_type())
-			{
-				activeWorkingSetSoftkeyMaskObjectID = std::static_pointer_cast<isobus::AlarmMask>(activeMask)->get_soft_key_mask();
-			}
-			else if (isobus::VirtualTerminalObjectType::DataMask == activeMask->get_object_type())
-			{
-				activeWorkingSetSoftkeyMaskObjectID = std::static_pointer_cast<isobus::DataMask>(activeMask)->get_soft_key_mask();
-				lastDataMaskWorkingSet = ws;
-			}
+			lastDataMaskWorkingSet = ws;
 		}
 
 		dataMaskRenderer.on_change_active_mask(ws);
@@ -1764,6 +1771,8 @@ void ServerMainComponent::on_change_active_mask_callback(std::shared_ptr<isobus:
 	}
 }
 
+// The VT server runs the macros of a Change Active Mask command itself: On Change Active Mask of the Working Set,
+// and On Hide/On Show of the old and new mask and their Soft Key Masks. This only updates the display.
 void ServerMainComponent::change_active_mask(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> affectedWorkingSet, std::uint16_t newMask)
 {
 	// A deferred call can arrive after the working set shut down or deleted its pool
@@ -1803,10 +1812,6 @@ void ServerMainComponent::change_active_mask(std::shared_ptr<isobus::VirtualTerm
 
 	if (!showNewMask)
 	{
-		// Macros run even when the display does not change
-		process_macro(newActiveMask, isobus::EventID::OnChangeActiveMask, isobus::VirtualTerminalObjectType::AlarmMask, affectedWorkingSet);
-		process_macro(newActiveMask, isobus::EventID::OnChangeActiveMask, isobus::VirtualTerminalObjectType::DataMask, affectedWorkingSet);
-
 		// A macro that changed the mask again was handled by its own callback
 		if (newMask == std::static_pointer_cast<isobus::WorkingSet>(affectedWorkingSet->get_working_set_object())->get_active_mask())
 		{
@@ -1849,18 +1854,12 @@ void ServerMainComponent::change_active_mask(std::shared_ptr<isobus::VirtualTerm
 			{
 				auto alarmMask = std::static_pointer_cast<isobus::AlarmMask>(newActiveMask);
 				activeWorkingSetSoftkeyMaskObjectID = alarmMask->get_soft_key_mask();
-
-				process_macro(newActiveMask, isobus::EventID::OnShow, isobus::VirtualTerminalObjectType::AlarmMask, affectedWorkingSet);
-				process_macro(newActiveMask, isobus::EventID::OnChangeActiveMask, isobus::VirtualTerminalObjectType::AlarmMask, affectedWorkingSet);
 			}
 			else if (isobus::VirtualTerminalObjectType::DataMask == newActiveMask->get_object_type())
 			{
 				auto dataMask = std::static_pointer_cast<isobus::DataMask>(newActiveMask);
 				activeWorkingSetSoftkeyMaskObjectID = dataMask->get_soft_key_mask();
 				lastDataMaskWorkingSet = activeWorkingSet;
-				// Also process macros for the actual datamask (container) show event
-				process_macro(newActiveMask, isobus::EventID::OnShow, isobus::VirtualTerminalObjectType::DataMask, affectedWorkingSet);
-				process_macro(newActiveMask, isobus::EventID::OnChangeActiveMask, isobus::VirtualTerminalObjectType::DataMask, affectedWorkingSet);
 			}
 		}
 	}
@@ -1920,7 +1919,24 @@ void ServerMainComponent::object_pool_parse_finished(std::shared_ptr<isobus::Vir
 
 		// A new pool is a new activation, and Load Version changes the mask without a callback
 		alarmActivationOrder.erase(workingSet);
-		record_alarm_activation(workingSet, std::static_pointer_cast<isobus::WorkingSet>(workingSet->get_working_set_object())->get_active_mask());
+		const auto activeMaskID = std::static_pointer_cast<isobus::WorkingSet>(workingSet->get_working_set_object())->get_active_mask();
+		record_alarm_activation(workingSet, activeMaskID);
+
+		// The drawn masks still hold the old pool's objects, and the new pool can set a different active mask
+		if (workingSet == activeWorkingSet)
+		{
+			if (activeMaskID != activeWorkingSetDataMaskObjectID)
+			{
+				change_active_mask(workingSet, activeMaskID);
+			}
+			else
+			{
+				dataMaskRenderer.close_replaced_input_dialog(workingSet);
+				activeWorkingSetSoftkeyMaskObjectID = get_soft_key_mask(workingSet->get_object_by_id(activeMaskID));
+				repaint_data_and_soft_key_mask();
+				update_ack_button_visibility();
+			}
+		}
 	}
 	else
 	{
